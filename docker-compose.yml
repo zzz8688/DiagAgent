@@ -1,0 +1,267 @@
+services:
+  mysql:
+    container_name: diagagent-mysql
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: 1234
+    restart: on-failure:3
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init/nacos-mysql.sql:/docker-entrypoint-initdb.d/1-nacos-mysql.sql
+      - ./init/diagagent-init.sql:/docker-entrypoint-initdb.d/2-diagagent-init.sql
+    ports:
+      - "3306:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p1234"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    networks:
+      - diagagent-net
+
+  mongodb:
+    container_name: diagagent-mongodb
+    image: mongo:7.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: 1234
+      MONGO_INITDB_DATABASE: diagagent
+    restart: on-failure:3
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - diagagent-net
+
+  etcd:
+    container_name: milvus-etcd
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+      - ETCD_WAL_SIZE_BYTES=104857600
+      - ETCD_MAX_TXN_OPS=2048
+      - ETCD_MAX_REQUEST_BYTES=104857600
+      - ETCD_INITIAL_CLUSTER_STATE=new
+      - ETCD_INITIAL_CLUSTER_TOKEN=milvus
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+      - ETCD_ADVERTISE_CLIENT_URLS=http://0.0.0.0:2379
+    cap_add:
+      - SYS_ADMIN
+    restart: on-failure:3
+    volumes:
+      - milvus_etcd_data:/etcd
+    ports:
+      - "2379:2379"
+      - "2381:2381"
+    networks:
+      - diagagent-net
+
+  minio:
+    container_name: milvus-minio
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    restart: on-failure:3
+    volumes:
+      - milvus_minio_data:/minio_data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: minio server /minio_data --console-address ":9001"
+    networks:
+      - diagagent-net
+
+  milvus:
+    container_name: milvus-standalone
+    image: milvusdb/milvus:v2.3.3
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    restart: on-failure:3
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      - etcd
+      - minio
+    networks:
+      - diagagent-net
+
+  redis:
+    container_name: diagagent-redis
+    image: redis:7-alpine
+    restart: on-failure:3
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    networks:
+      - diagagent-net
+
+  zookeeper:
+    container_name: diagagent-zookeeper
+    image: bitnami/zookeeper:3.9
+    restart: on-failure:3
+    ports:
+      - "2181:2181"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    networks:
+      - diagagent-net
+
+  kafka:
+    container_name: diagagent-kafka
+    image: bitnami/kafka:2.8
+    restart: on-failure:3
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    depends_on:
+      - zookeeper
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CFG_LISTENERS=INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    networks:
+      - diagagent-net
+
+  mock-metrics-service:
+    container_name: diagagent-mock-metrics-service
+    image: python:3.12-alpine
+    restart: on-failure:3
+    working_dir: /app
+    command: ["python", "mock/metrics-service/app.py"]
+    volumes:
+      - ./:/app
+    ports:
+      - "8001:8001"
+    networks:
+      - diagagent-net
+
+  prometheus:
+    container_name: diagagent-prometheus
+    image: prom/prometheus:v2.54.1
+    restart: on-failure:3
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./conf/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - mock-metrics-service
+    networks:
+      - diagagent-net
+
+  nacos:
+    container_name: diagagent-nacos
+    image: nacos/nacos-server:v2.2.3
+    environment:
+      - MODE=standalone
+      - JVM_XMS=256m
+      - JVM_XMX=512m
+      - NACOS_AUTH_ENABLE=false
+      - SPRING_DATASOURCE_PLATFORM=mysql
+      - spring.sql.init.platform=mysql
+      - MYSQL_DATABASE_NUM=1
+      - MYSQL_SERVICE_HOST=mysql
+      - MYSQL_SERVICE_PORT=3306
+      - MYSQL_SERVICE_DB_NAME=nacos_config
+      - MYSQL_SERVICE_USER=root
+      - MYSQL_SERVICE_PASSWORD=1234
+      - MYSQL_SERVICE_DB_PARAM=characterEncoding=utf8&connectTimeout=1000&socketTimeout=3000&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true
+    restart: on-failure:3
+    volumes:
+      - nacos_data:/home/nacos/data
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8848/nacos/v1/console/health/readiness || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+    networks:
+      - diagagent-net
+
+  diagagent:
+    container_name: diagagent
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      API_Key: "${API_Key}"
+      AgentId: "${AgentId}"
+      Ding_Client_ID: "${Ding_Client_ID}"
+      Ding_Client_Secret: "${Ding_Client_Secret}"
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      NACOS_SERVER_ADDR: nacos:8848
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/diagagent?useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATA_MONGODB_URI: mongodb://root:1234@mongodb:27017/diagagent?authSource=admin
+      MILVUS_HOST: milvus
+      MILVUS_URI: http://milvus:19530
+      PROMETHEUS_BASE_URL: http://prometheus:9090
+      KNOWLEDGE_BASE_PATH: /app/knowledge
+      MEMORY_FILES_PATH: /app/memory
+      SKILLS_BASE_PATH: /app/skills
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      JAVA_OPTS: "-Xms256m -Xmx512m -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8"
+      SERVER_PORT: 8081
+      A2A_SELF_ENDPOINT: http://localhost:8081/a2a
+      # dingtalk-mcp 走 DashScope SSE 鉴权，直接复用 API_Key，并透传 AgentId / Ding_Client_ID / Ding_Client_Secret
+    volumes:
+      - ./knowledge:/app/knowledge
+      - ./memory:/app/memory
+      - ./skills:/app/skills
+      - ./mcp:/app/mcp
+    ports:
+      - "8081:8081"
+    depends_on:
+      - mysql
+      - mongodb
+      - milvus
+      - redis
+      - nacos
+      - kafka
+      - prometheus
+    networks:
+      - diagagent-net
+
+networks:
+  diagagent-net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  mongodb_data:
+  milvus_etcd_data:
+  milvus_minio_data:
+  milvus_data:
+  redis_data:
+  nacos_data:
+  prometheus_data:

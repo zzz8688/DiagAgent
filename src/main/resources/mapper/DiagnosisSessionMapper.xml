@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="io.github.zzz8688.diagagent.mapper.DiagnosisSessionMapper">
+
+    <resultMap id="DiagnosisSessionResultMap" type="io.github.zzz8688.diagagent.entity.DiagnosisSession">
+        <id property="id" column="id"/>
+        <result property="sessionId" column="session_id"/>
+        <result property="title" column="title"/>
+        <result property="engine" column="engine"/>
+        <result property="userId" column="user_id"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="DiagnosisSessionColumns">
+        id, session_id, title, engine, user_id, created_at, updated_at
+    </sql>
+
+    <insert id="insert" parameterType="io.github.zzz8688.diagagent.entity.DiagnosisSession" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO diagnosis_session
+        (session_id, title, engine, user_id, created_at, updated_at)
+        VALUES
+        (#{sessionId}, #{title}, #{engine}, #{userId}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="findAllByUserId" resultMap="DiagnosisSessionResultMap">
+        SELECT <include refid="DiagnosisSessionColumns"/>
+        FROM diagnosis_session
+        <where>
+            <if test="userId != null">
+                user_id = #{userId}
+            </if>
+        </where>
+        ORDER BY created_at DESC
+    </select>
+
+    <select id="findBySessionId" resultMap="DiagnosisSessionResultMap">
+        SELECT <include refid="DiagnosisSessionColumns"/>
+        FROM diagnosis_session
+        WHERE session_id = #{sessionId}
+        LIMIT 1
+    </select>
+
+    <update id="updateById" parameterType="io.github.zzz8688.diagagent.entity.DiagnosisSession">
+        UPDATE diagnosis_session
+        <set>
+            <if test="title != null">title = #{title},</if>
+            <if test="engine != null">engine = #{engine},</if>
+            <if test="userId != null">user_id = #{userId},</if>
+            updated_at = #{updatedAt}
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteBySessionId">
+        DELETE FROM diagnosis_session WHERE session_id = #{sessionId}
+    </delete>
+
+    <delete id="deleteAllByUserId">
+        DELETE FROM diagnosis_session
+        <where>
+            <if test="userId != null">
+                user_id = #{userId}
+            </if>
+        </where>
+    </delete>
+</mapper>

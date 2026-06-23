@@ -1,0 +1,344 @@
+
+server:
+  port: 8081
+  tomcat:
+    uri-encoding: UTF-8
+    connection-timeout: 120000
+    keep-alive-timeout: 120000
+    threads:
+      max: 200
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: diag-agent
+  mvc:
+    async:
+      request-timeout: 120000
+  profiles:
+    active: local
+  sql:
+    init:
+      mode: never
+  jpa:
+    hibernate:
+      ddl-auto: none
+  cloud:
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+      username: nacos
+      password: nacos
+      config:
+        enabled: true
+        server-addr: ${NACOS_SERVER_ADDR:nacos:8848}
+        username: nacos
+        password: nacos
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:127.0.0.1:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      group-id: diag-agent-consumer-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    listener:
+      ack-mode: manual_immediate
+
+diagagent:
+  diagnostic-engine: multi-agent # 可选值：llm-agent（大模型智能体），multi-agent（多智能体）
+  kafka:
+    log-ingest-topic: ${DIAGAGENT_KAFKA_LOG_INGEST_TOPIC:log-ingest}
+    log-ingest-group: ${DIAGAGENT_KAFKA_LOG_INGEST_GROUP:diag-agent-log-consumer}
+
+diag:
+  agent:
+    prompt:
+      system:
+        main-agent:
+          data-id: diag-agent-main-prompt
+          group: DEFAULT_GROUP
+          timeout-ms: 20000
+        app-agent:
+          data-id: diag-agent-app-prompt
+          group: DEFAULT_GROUP
+          timeout-ms: 20000
+        db-agent:
+          data-id: diag-agent-db-prompt
+          group: DEFAULT_GROUP
+          timeout-ms: 20000
+        network-agent:
+          data-id: diag-agent-network-prompt
+          group: DEFAULT_GROUP
+          timeout-ms: 20000
+        critic-agent:
+          data-id: diag-agent-critic-prompt
+          group: DEFAULT_GROUP
+          timeout-ms: 20000
+        memory-maintenance-agent:
+          data-id: diag-agent-memory-maintenance-prompt
+          group: DEFAULT_GROUP
+          timeout-ms: 20000
+
+logging:
+  level:
+    root: INFO
+    io.github.zzz8688.diagagent: DEBUG
+    io.github.zzz8688.diagagent.mq.KafkaLogConsumer: WARN
+    dev.langchain4j: DEBUG
+  charset:
+    console: UTF-8
+    file: UTF-8
+
+langchain4j:
+  community:
+    dashscope:
+      chat-model:
+        api-key: ${API_Key}
+        model-name: qwen-flash
+        log-requests: true
+        log-responses: true
+      streaming-chat-model:
+        api-key: ${API_Key}
+        model-name: qwen-flash
+        log-requests: true
+        log-responses: true
+      embedding-model:
+        api-key: ${API_Key}
+        model-name: text-embedding-v4
+
+# 模型配置现在通过 Nacos 动态配置
+# 配置项: diag-agent-model-config (DEFAULT_GROUP)
+# 格式:
+# chatModelName=qvq-max-2025-03-25
+# streamingChatModelName=qvq-max-2025-03-25
+# embeddingModelName=text-embedding-v4
+# rerankerModelName=qwen3-rerank
+
+milvus:
+  host: ${MILVUS_HOST:localhost}
+  port: ${MILVUS_PORT:19530}
+  collection-name: diagagent_embeddings
+  log-collection-name: ${MILVUS_LOG_COLLECTION:diagagent_logs}
+  knowledge-collection-name: ${MILVUS_KNOWLEDGE_COLLECTION:diagagent_knowledge}
+  memory-collection-name: ${MILVUS_MEMORY_COLLECTION:diagagent_memory}
+  dimension: 1024
+
+knowledge:
+  base:
+    path: ${KNOWLEDGE_BASE_PATH:./knowledge}
+  rag:
+    chunk:
+      max-segment-size: 500
+      overlap-size: 80
+      max-embedding-input-length: 2000
+    retrieval:
+      vector-top-k: 15
+      bm25-top-k: 15
+      fusion-top-k: 25
+      rerank-top-n: 8
+      final-top-k: 5
+      min-vector-score: 0.2
+    bm25:
+      k1: 1.5
+      b: 0.75
+    reranker:
+      enabled: true
+      base-url: ${RERANKER_BASE_URL:https://dashscope.aliyuncs.com}
+      path: ${RERANKER_PATH:/api/v1/services/rerank/text-rerank/text-rerank}
+      api-key: ${RERANKER_API_KEY:${API_Key:}}
+      timeout-seconds: 10
+
+skills:
+  base:
+    path: ${SKILLS_BASE_PATH:./skills}
+
+sandbox:
+  enabled: ${SANDBOX_ENABLED:true}
+  mode: ${SANDBOX_MODE:DEFAULT}
+  approval-backend: ${SANDBOX_APPROVAL_BACKEND:HEADLESS_CALLBACK}
+  auto-approve-ask-requests: ${SANDBOX_AUTO_APPROVE_ASK_REQUESTS:false}
+  max-audit-records: ${SANDBOX_MAX_AUDIT_RECORDS:200}
+  default-profile:
+    profile-name: default
+    read-only-filesystem: ${SANDBOX_READ_ONLY_FILESYSTEM:true}
+    allow-read-paths:
+      - .
+    allow-write-paths: []
+    deny-read-paths: []
+    deny-write-paths: []
+    network-enabled: ${SANDBOX_NETWORK_ENABLED:false}
+    allowed-domains: []
+    denied-domains: []
+    allow-unsandboxed-fallback: false
+    max-wall-clock-time: ${SANDBOX_MAX_WALL_CLOCK_TIME:30s}
+    max-output-bytes: ${SANDBOX_MAX_OUTPUT_BYTES:30000}
+    environment-allowlist: {}
+  rules:
+    - action: ALLOW
+      tool-selector: runShellCommand
+      target-pattern: prefix:Get-ChildItem
+      source: LOCAL_SETTINGS
+      reason: 允许目录读取类命令直接执行
+    - action: ALLOW
+      tool-selector: runShellCommand
+      target-pattern: prefix:Get-Location
+      source: LOCAL_SETTINGS
+      reason: 允许工作目录读取类命令直接执行
+    - action: ALLOW
+      tool-selector: runShellCommand
+      target-pattern: prefix:Test-Path
+      source: LOCAL_SETTINGS
+      reason: 允许路径检查类命令直接执行
+    - action: ASK
+      tool-selector: runShellCommand
+      target-pattern: prefix:Invoke-WebRequest
+      source: LOCAL_SETTINGS
+      reason: 联网命令默认需要审批
+    - action: DENY
+      tool-selector: runShellCommand
+      target-pattern: prefix:Remove-Item
+      source: POLICY_SETTINGS
+      reason: 默认禁止删除命令
+      read-only: true
+
+mcp:
+  diagagent-server:
+    enabled: ${DIAGAGENT_MCP_SERVER_ENABLED:true}
+    visible-in-runtime-tool-pool: ${DIAGAGENT_MCP_VISIBLE_IN_RUNTIME_TOOL_POOL:false}
+    exposed-tool-names: ${DIAGAGENT_MCP_EXPOSED_TOOL_NAMES:queryLogs,queryPrometheusMetrics,queryKnowledgeBase,queryMemoryFiles,querySkills,runSkill,runShellCommand,queryTopology,getDependencies}
+  prometheus:
+    enabled: ${PROMETHEUS_MCP_ENABLED:true}
+    python-command: ${PROMETHEUS_MCP_PYTHON:python}
+    script-path: ${PROMETHEUS_MCP_SCRIPT:./mcp/prometheus-mcp-server.py}
+    base-url: ${PROMETHEUS_BASE_URL:http://localhost:9090}
+    call-timeout-ms: ${PROMETHEUS_MCP_CALL_TIMEOUT_MS:10000}
+  dingtalk:
+    enabled: ${DINGTALK_MCP_ENABLED:true}
+    sse-endpoint: ${DINGTALK_MCP_SSE_ENDPOINT:https://dashscope.aliyuncs.com/api/v1/mcps/dingtalk-mcp/sse}
+    api-key: ${API_Key:}
+    authorization-header: ${DINGTALK_MCP_AUTHORIZATION_HEADER:Authorization}
+    request-timeout-ms: ${DINGTALK_MCP_REQUEST_TIMEOUT_MS:15000}
+    ding-client-id: ${Ding_Client_ID:}
+    ding-client-secret: ${Ding_Client_Secret:}
+    open-api-base-url: ${DINGTALK_OPENAPI_BASE_URL:https://oapi.dingtalk.com}
+    department-user-page-size: ${DINGTALK_DEPARTMENT_USER_PAGE_SIZE:100}
+    agent-id: ${AgentId:0}
+    to-all-user: ${DINGTALK_MCP_TO_ALL_USER:true}
+    user-id-list: ${DINGTALK_MCP_USERID_LIST:}
+    dept-id-list: ${DINGTALK_MCP_DEPT_ID_LIST:}
+    message-type: ${DINGTALK_MCP_MESSAGE_TYPE:markdown}
+    link-message-url: ${DINGTALK_MCP_LINK_MESSAGE_URL:http://localhost:5173/diagnosis}
+    link-pic-url: ${DINGTALK_MCP_LINK_PIC_URL:}
+    preferred-tool-names: ${DINGTALK_MCP_PREFERRED_TOOL_NAMES:sendNotice}
+
+a2a:
+  enabled: ${A2A_ENABLED:true}
+  client:
+    connect-timeout-ms: ${A2A_CLIENT_CONNECT_TIMEOUT_MS:5000}
+    request-timeout-ms: ${A2A_CLIENT_REQUEST_TIMEOUT_MS:30000}
+    streaming-request-timeout-ms: ${A2A_CLIENT_STREAMING_REQUEST_TIMEOUT_MS:60000}
+    agent-card-refresh-interval-ms: ${A2A_CLIENT_AGENT_CARD_REFRESH_INTERVAL_MS:60000}
+    user-agent: ${A2A_CLIENT_USER_AGENT:DiagAgent-A2A-Client/1.0}
+  self:
+    enabled: ${A2A_SELF_ENABLED:true}
+    agent-id: ${A2A_SELF_AGENT_ID:diag-agent-a2a}
+    name: ${A2A_SELF_NAME:DiagAgent}
+    description: ${A2A_SELF_DESCRIPTION:统一诊断代理平台，负责故障分析、技能编排、MCP 工具治理与人工介入升级。}
+    endpoint: ${A2A_SELF_ENDPOINT:http://localhost:8081/a2a}
+    preferred-transport: ${A2A_SELF_PREFERRED_TRANSPORT:jsonrpc}
+    protocol-version: ${A2A_SELF_PROTOCOL_VERSION:1.0}
+    version: ${A2A_SELF_VERSION:1.0.0}
+    streaming: ${A2A_SELF_STREAMING:true}
+    push-notifications: ${A2A_SELF_PUSH_NOTIFICATIONS:false}
+    default-input-modes:
+      - text
+    default-output-modes:
+      - text
+    documentation-url: ${A2A_SELF_DOCUMENTATION_URL:}
+    skills:
+      - id: incident-diagnosis
+        name: Incident Diagnosis
+        description: 接收故障描述并编排指标、日志、知识和工具完成诊断。
+        tags: [ diagnosis, incident ]
+        examples: [ "诊断最近 30 分钟的接口错误率飙升" ]
+      - id: metric-analysis
+        name: Metric Analysis
+        description: 负责 Prometheus 指标分析、异常定位和趋势归因。
+        tags: [ metrics, prometheus ]
+        examples: [ "分析 CPU 与延迟异常" ]
+      - id: tool-governance
+        name: Tool Governance
+        description: 通过统一 sandbox、approval、audit 保护本地工具和 MCP tools/call。
+        tags: [ sandbox, security ]
+        examples: [ "执行只读 shell 排查命令" ]
+      - id: skill-orchestration
+        name: Skill Orchestration
+        description: 根据技能库与上下文生成可执行 skill plan，并分发给主模型或子代理。
+        tags: [ skills, orchestration ]
+        examples: [ "运行一个诊断 handoff skill" ]
+  remotes:
+    - enabled: ${A2A_REMOTE_CRITIC_ENABLED:true}
+      agent-id: ${A2A_REMOTE_CRITIC_ID:critic-a2a}
+      name: ${A2A_REMOTE_CRITIC_NAME:Final Answer Critic}
+      description: ${A2A_REMOTE_CRITIC_DESCRIPTION:负责 final answer review、grounding 复核与过度结论拦截的远端批评 Agent。}
+      endpoint: ${A2A_REMOTE_CRITIC_ENDPOINT:http://localhost:10001}
+      preferred-transport: ${A2A_REMOTE_CRITIC_TRANSPORT:jsonrpc}
+      protocol-version: ${A2A_REMOTE_CRITIC_PROTOCOL_VERSION:1.0}
+      version: ${A2A_REMOTE_CRITIC_VERSION:1.0.0}
+      streaming: ${A2A_REMOTE_CRITIC_STREAMING:true}
+      push-notifications: ${A2A_REMOTE_CRITIC_PUSH_NOTIFICATIONS:false}
+      default-input-modes: [ text ]
+      default-output-modes: [ text ]
+      skills:
+        - id: final-answer-review
+          name: Final Answer Review
+          description: 审核最终诊断草稿的证据覆盖、grounding 与 handoff 决策。
+          tags: [ critic, review, grounding ]
+          examples: [ "复核这份支付故障结论是否被日志与指标充分支撑" ]
+
+# 对话记忆配置
+chat:
+  memory:
+    enable-summary: true  # 是否启用对话摘要压缩
+    max-messages-before-summary: 30  # 运行时保留的最近消息窗口
+    questions-per-summary: 5  # 每累计 5 个新问题滚动压缩一次长期记忆
+    max-tokens: 4000  # 摘要的最大 token 数
+memory:
+  files:
+    path: ${MEMORY_FILES_PATH:./memory}
+    rag:
+      chunk:
+        max-embedding-input-length: ${MEMORY_FILES_RAG_MAX_EMBEDDING_INPUT_LENGTH:2000}
+      retrieval:
+        vector-top-k: ${MEMORY_FILES_RAG_VECTOR_TOP_K:12}
+        bm25-top-k: ${MEMORY_FILES_RAG_BM25_TOP_K:12}
+        final-top-k: ${MEMORY_FILES_RAG_FINAL_TOP_K:5}
+        fusion-top-k: ${MEMORY_FILES_RAG_FUSION_TOP_K:20}
+        rerank-top-n: ${MEMORY_FILES_RAG_RERANK_TOP_N:8}
+        min-vector-score: ${MEMORY_FILES_RAG_MIN_VECTOR_SCORE:0.2}
+  maintenance:
+    enabled: ${MEMORY_MAINTENANCE_ENABLED:true}
+    fixed-delay-ms: ${MEMORY_MAINTENANCE_FIXED_DELAY_MS:60000}
+    batch-size: ${MEMORY_MAINTENANCE_BATCH_SIZE:5}
+    min-summary-length: ${MEMORY_MAINTENANCE_MIN_SUMMARY_LENGTH:80}
+  react-loop:
+    max-tool-calls-per-question: 24  # 单个问题最多允许的工具调用次数
+    max-consecutive-same-call: 5  # 相同工具+相同参数最多连续调用次数
+
+# 日志检索配置
+logs:
+  retrieval:
+    vector-top-k: ${LOG_RETRIEVAL_VECTOR_TOP_K:15}
+    keyword-top-k: ${LOG_RETRIEVAL_KEYWORD_TOP_K:15}
+    final-top-k: ${LOG_RETRIEVAL_FINAL_TOP_K:8}
+    min-vector-score: ${LOG_RETRIEVAL_MIN_VECTOR_SCORE:0.2}
+
